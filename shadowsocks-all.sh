@@ -41,7 +41,7 @@ mbedtls_file="mbedtls-2.6.0"
 mbedtls_url="https://raw.githubusercontent.com/YXuuan/shad0ws0cks-install/master/mbedtls-2.6.0-gpl.tgz"
 
 shadowsocks_python_file="shadowsocks-master"
-shadowsocks_python_url="https://raw.githubusercontent.com/YXuuan/shad0ws0cks-install/master/shadowsocks-master.zip"
+shadowsocks_python_url="https://github.com/shadowsocks/shadowsocks/archive/master.zip"
 shadowsocks_python_init="/etc/init.d/shadowsocks-python"
 shadowsocks_python_config="/etc/shadowsocks-python/config.json"
 shadowsocks_python_centos="https://raw.githubusercontent.com/YXuuan/shad0ws0cks-install/master/shadowsocks"
@@ -310,7 +310,7 @@ download_files() {
     cd ${cur_dir}
 
     if   [ "${selected}" == "1" ]; then
-        download "${shadowsocks_python_file}.zip" "${shadowsocks_python_url}"
+        # download "${shadowsocks_python_file}.zip" "${shadowsocks_python_url}"
         if check_sys packageManager yum; then
             download "${shadowsocks_python_init}" "${shadowsocks_python_centos}"
         elif check_sys packageManager apt; then
@@ -516,7 +516,7 @@ install_dependencies() {
         done
     elif check_sys packageManager apt; then
         apt_depends=(
-            gettext build-essential unzip gzip python python-dev python-setuptools curl openssl libssl-dev
+            gettext build-essential unzip gzip python3 python3-dev pip libmbedtls-dev python3-setuptools curl openssl libssl-dev libsodium-dev net-tools
             autoconf automake libtool gcc make perl cpio libpcre3 libpcre3-dev zlib1g-dev libev-dev libc-ares-dev git qrencode
         )
 
@@ -791,51 +791,16 @@ install_prepare() {
 }
 
 install_libsodium() {
-    if [ ! -f /usr/lib/libsodium.a ]; then
-        cd ${cur_dir}
-        download "${libsodium_file}.tar.gz" "${libsodium_url}"
-        tar zxf ${libsodium_file}.tar.gz
-        cd ${libsodium_file}
-        ./configure --prefix=/usr && make && make install
-        if [ $? -ne 0 ]; then
-            echo -e "[${red}Error${plain}] ${libsodium_file} install failed."
-            install_cleanup
-            exit 1
-        fi
-    else
-        echo -e "[${green}Info${plain}] ${libsodium_file} already installed."
-    fi
+    apt install libsodium-dev libssl-dev net-tools
 }
 
 install_mbedtls() {
-    if [ ! -f /usr/lib/libmbedtls.a ]; then
-        cd ${cur_dir}
-        download "${mbedtls_file}-gpl.tgz" "${mbedtls_url}"
-        tar xf ${mbedtls_file}-gpl.tgz
-        cd ${mbedtls_file}
-        make SHARED=1 CFLAGS=-fPIC
-        make DESTDIR=/usr install
-        if [ $? -ne 0 ]; then
-            echo -e "[${red}Error${plain}] ${mbedtls_file} install failed."
-            install_cleanup
-            exit 1
-        fi
-    else
-        echo -e "[${green}Info${plain}] ${mbedtls_file} already installed."
-    fi
+    apt install libmbedtls-dev
 }
 
 install_shadowsocks_python() {
     cd ${cur_dir}
-    unzip -q ${shadowsocks_python_file}.zip
-    if [ $? -ne 0 ];then
-        echo -e "[${red}Error${plain}] unzip ${shadowsocks_python_file}.zip failed, please check unzip command."
-        install_cleanup
-        exit 1
-    fi
-
-    cd ${shadowsocks_python_file}
-    python setup.py install --record /usr/local/shadowsocks_python.log
+    pip install ${shadowsocks_python_file}
 
     if [ -f /usr/bin/ssserver ] || [ -f /usr/local/bin/ssserver ]; then
         chmod +x ${shadowsocks_python_init}
