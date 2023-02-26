@@ -1,0 +1,138 @@
+1. create a self-signed ca
+
+sudo ipsec pki --gen --type rsa --size 4096 --outform pem > ca-key.pem
+sudo ipsec pki --self --ca --lifetime 3650 --in ca-key.pem \
+--type rsa --dn "C=US, O=VPN Server, CN=VPN CA" --outform pem > ca-cert.pem
+
+2. create a server key and certificate (need to replace the ip address in --san)
+
+sudo ipsec pki --gen --type rsa --size 4096 --outform pem > server-key.pem
+sudo ipsec pki --pub --in server-key.pem --type rsa \
+| sudo ipsec pki --issue --lifetime 1825 \
+--cacert ca-cert.pem --cakey ca-key.pem \
+--dn "C=US, O=VPN Server, CN=vpnserver.com" \
+--san 192.168.86.26 --flag serverAuth --flag ikeIntermediate \
+--outform pem > server-cert.pem
+
+3. edit /etc/ipsec.conf (ip address replacement)
+
+config setup
+    charondebug="ike 1, knl 1, cfg 1, enc 1, net 1, chd 1, dmn 1, esp 1, imc 1, imv 1, job 1, lib 1, mgr 1, pts 1, tls 1, tnc 1"
+    uniqueids=no
+
+conn client1
+    auto=start
+    keyexchange=ikev2
+    left=%any
+    leftid=%any
+    leftcert=/etc/ipsec.d/certs/server-cert.pem
+    leftca=/etc/ipsec.d/cacerts/ca-cert.pem
+    leftsendcert=always
+    leftsubnet=0.0.0.0/24
+    right=%any
+    rightid=%any
+    rightsubnet=10.10.10.0/24
+    rightsourceip=10.10.10.1/32
+    rightdns=8.8.8.8,8.8.4.4
+    rightcert=/etc/ipsec.d/certs/client1-cert.pem
+    rightauth=pubkey
+    ike=aes256-sha256-modp3072,chacha20poly1305-sha512-curve25519-prfsha512,aes256gcm16-sha384-prfsha384-ecp384,aes256-sha1-modp1024,aes128-sha1-modp1024,3des-sha1-modp1024!
+    esp=aes256-sha256-modp3072,chacha20poly1305-sha512,aes256gcm16-ecp384,aes256-sha256,aes256-sha1,3des-sha1!
+
+
+4. create client certifiation without --san because my client has no specific ip address and domain name. And CN=client1 or CN=client2 is used indentify the client name in /etc/ipsec.secrets
+
+sudo ipsec pki --gen --type rsa --size 4096 --outform pem > client1-key.pem
+sudo ipsec pki --pub --in client1-key.pem --type rsa \
+| sudo ipsec pki --issue --lifetime 1825 \
+--cacert ca-cert.pem --cakey ca-key.pem \
+--dn "C=US, O=VPN Client, CN=client1" \
+--outform pem > client1-cert.pem
+
+sudo ipsec pki --gen --type rsa --size 4096 --outform pem > client2-key.pem
+sudo ipsec pki --pub --in client2-key.pem --type rsa \
+| sudo ipsec pki --issue --lifetime 1825 \
+--cacert ca-cert.pem --cakey ca-key.pem \
+--dn "C=US, O=VPN Client, CN=client2" \
+--outform pem > client2-cert.pem
+
+5. create pkcs12 files, that contains the client's private key and public key, as well as the CA certificate. (password is 1234567890)
+sudo openssl pkcs12 -export -inkey client1-key.pem -in client1-cert.pem \
+-name "VPN Client Certificate" -certfile ca-cert.pem -caname "VPN CA" \
+-out client1-cert.p12
+
+sudo openssl pkcs12 -export -inkey client2-key.pem -in client2-cert.pem \
+-name "VPN Client Certificate" -certfile ca-cert.pem -caname "VPN CA" \
+-out client2-cert.p12
+
+
+5. save the certification and private keys
+sudo -i
+sudo chown -R root:root /etc/ipsec.d
+sudo chmod -R 600 /etc/ipsec.d/private/
+sudo chmod -R 644 /etc/ipsec.d/cacerts/
+sudo chmod -R 644 /etc/ipsec.d/certs/
+cp /home/ubuntu/server-cert.pem /etc/ipsec.d/certs/
+cp /home/ubuntu/server-key.pem /etc/ipsec.d/private/
+cp /home/ubuntu/ca-cert.pem /etc/ipsec.d/cacerts/
+cp /home/ubuntu/ca-key.pem /etc/ipsec.d/private/
+cp /home/ubuntu/client1-cert.pem /etc/ipsec.d/certs/
+cp /home/ubuntu/client2-cert.pem /etc/ipsec.d/certs/
+cp /home/ubuntu/client1-key.pem /etc/ipsec.d/private/
+cp /home/ubuntu/client2-key.pem /etc/ipsec.d/private/
+
+6. verify client name
+openssl x509 -in client1-cert.pem -noout -subject
+openssl x509 -in client2-cert.pem -noout -subject
+
+7. add client certification for authentication (server-key.pem should be the first line)
+gedit /etc/ipsec.secrets
+: RSA server-key.pem
+
+client1 : X509 client1-cert.pem
+client1 : RSA client1-key.pem
+
+client2 : X509 client2-cert.pem
+client2 : RSA client2-key.pem
+
+
+
+8. enable self-signed ca on client side
+sudo apt-get install network-manager-strongswan
+sudo service network-manager restart
+reboot client ubuntu
+cp server-cert.pem, ca-cert.pem, client1-cert.pem and client1-key.pem into client ubuntu
+sudo cp ca-cert.pem /usr/local/share/ca-certificates/
+sudo update-ca-certificates
+reboot client ubuntu
+openssl verIfy -cafile ca-cert.pem server-cert.pem
+
+network settings -> vpn
+server: 
+	address: 192.168.86.26
+	certificate: server-cert.pem
+	identity: null (must be empty)
+client:
+	certification: certificate
+	certificate: certificate/private key
+	certificate file: client1-cert.pem
+	private key: client1-key.pem
+	identity: null (notice, must be empty)
+server port: 4500
+request inner ip address has to be checked to request the virtual ip adress from vpn server side with rightsourceip and rightsubnet.
+
+sudo ufw allow 4500/udp
+sudo ufw allow 450/udp
+
+debug method:
+sudo journalctl -f
+change charondebug=
+need to remove below lines for NAT:
+rightsourceip=10.10.10.0/24
+    rightdns=8.8.8.8,8.8.4.4
+
+
+all traffic should go through vpn server
+sudo ip route add 10.10.10.0/24 via 10.10.10.1 dev tun0
+
+
